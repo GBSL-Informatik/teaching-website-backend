@@ -68,10 +68,10 @@ const SESSION_KEY = 'twaApiKey';
 /** https://medium.com/developer-rants/how-to-handle-sessions-properly-in-express-js-with-heroku-c35ea8c0e500 */
 export const sessionMiddleware = session({
     name: SESSION_KEY /** twa stands for "TeachingWebsiteApi" */,
-    store: store,
-    secret: process.env.SESSION_SECRET || 'secret',
-    saveUninitialized: false,
-    resave: false,
+    store: store, /** raw Postgres connection to the 'sessions' table */
+    secret: process.env.SESSION_SECRET || 'secret', /** token signing key */
+    saveUninitialized: false, /** Do not store the login session unless it has been modified */
+    resave: false, /** Do not update the stored login session unless it has been modified */
     proxy: process.env.NODE_ENV === 'production',
     cookie: {
         secure: process.env.NODE_ENV === 'production',
@@ -129,6 +129,7 @@ app.get(`${API_URL}/checklogin`, SessionOauthStrategy, async (req, res, next) =>
 app.post(`${API_URL}/logout`, SessionOauthStrategy, async (req, res) => {
     Logger.info(req.user);
     Logger.info(req.session);
+    // TODO: This seems to lead to a race condition when the session isn't created yet.
     await prisma.sessions.delete({ where: { sid: req.session.id } });
     res.clearCookie(SESSION_KEY).status(200).send('OK');
 });
@@ -140,6 +141,8 @@ export const configure = (_app: typeof app) => {
             if (req.isAuthenticated()) {
                 return next();
             }
+            // TODO: {session: true} does not cause the session to be saved, other than in the /checkLogin endpoint. Maybe this is because we supply a callback to
+            //  the authenticate()-function? Maybe a call to req.session.save() or req.login() could fix this - but is that what we want?
             passport.authenticate('oauth-bearer', { session: true }, (err: Error, user: User, info: any) => {
                 if (err) {
                     /**
